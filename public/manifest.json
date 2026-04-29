@@ -1,0 +1,17 @@
+{
+  "name": "CMMS Pro - Gestão de Manutenção",
+  "short_name": "CMMS Pro",
+  "description": "Sistema de Gestão de Manutenção com Excel",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2942/2942544.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

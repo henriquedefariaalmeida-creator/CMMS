@@ -1,0 +1,459 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: assets
+    // Fields: ID, Tag, Model, Description, Location, Plant, Manufacturer, Status, InstallDate, id
+    //
+    // Collection: work-orders
+    // Fields: ID, AssetID, PlanID, Description, Priority, Status, AssignedTo, CreatedAt, CompletedAt, ScheduledDate, EstimatedTime, Collaborators, id
+    //
+    // Collection: preventive-plans
+    // Fields: ID, AssetIDs, AssetLastDones, AssetNextDues, Task, Frequency, LastDone, NextDue, Type, Criticality, AssetType, Location, Plant, EstimatedTime, Collaborators, id
+    //
+    // Collection: users
+    // Fields: uid, email, displayName, photoURL, role, createdAt
+    //
+    // Collection: employees
+    // Fields: ID, Name, Function, Status, id
+    //
+    // Collection: failure-records
+    // Fields: Grupo, Modelo, Dia, Mes, Ano, HoraProg, ManutMecanica, ManutEletrica, IndispMecDiaria, IndispEletDiaria, IndispMensalMec, IndispMensalElet, IndispTotal, id
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "lucas.lds36@gmail.com" || request.auth.token.email == "matheuslnapoli22@gmail.com" || request.auth.token.email == "henriquedefariaalmeida@gmail.com") ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'visualizador') == 'admin')
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function validString(field, min, max) {
+      return request.resource.data[field] is string && 
+             request.resource.data[field].size() >= min && 
+             request.resource.data[field].size() <= max;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidAsset(data) {
+      return hasOnlyAllowedFields(['ID', 'Tag', 'Model', 'Description', 'Location', 'Plant', 'Manufacturer', 'Status', 'InstallDate', 'id', 'createdBy', 'statusChangedAt']) &&
+             data.ID is string && data.ID.size() > 0 &&
+             data.Tag is string && data.Tag.size() > 0 &&
+             data.Model is string && data.Model.size() > 0 &&
+             data.Status in ['Ativo', 'Inativo', 'Em Manutenção', 'Parado'];
+    }
+
+    function isValidWorkOrder(data) {
+      return data.ID is string && data.ID.size() < 100 &&
+             (data.AssetID is string || data.assetId is string) &&
+             (data.PlanID is string || !('PlanID' in data)) &&
+             (data.TechnicianID is string || !('TechnicianID' in data)) &&
+             (data.Priority in ['Baixa', 'Média', 'Alta', 'Crítica'] || data.priority in ['Baixa', 'Média', 'Alta', 'Crítica']) &&
+             (data.Type in ['Preventiva', 'Corretiva', 'Preditiva'] || data.type in ['Preventiva', 'Corretiva', 'Preditiva'] || (!('Type' in data) && !('type' in data))) &&
+             (data.Nature in ['Emergencial', 'Programada', 'Oportunidade'] || data.nature in ['Emergencial', 'Programada', 'Oportunidade'] || (!('Nature' in data) && !('nature' in data))) &&
+             (data.ActivityType in ['Lubrificação', 'Inspeção', 'Ajuste', 'Reparo', 'Substituição'] || data.activityType in ['Lubrificação', 'Inspeção', 'Ajuste', 'Reparo', 'Substituição'] || (!('ActivityType' in data) && !('activityType' in data))) &&
+             data.Status in ['Em Aberto', 'Em Execução', 'Concluída', 'Cancelada'] &&
+             (data.Description is string && data.Description.size() < 2000 || !('Description' in data)) &&
+             (data.Cause is string && data.Cause.size() < 2000 || !('Cause' in data)) &&
+             (data.scope is string && data.scope.size() < 5000 || !('scope' in data)) &&
+             (data.Checklist is list && data.Checklist.size() < 100 || !('Checklist' in data)) &&
+             (data.ScheduledDate is string || !('ScheduledDate' in data)) &&
+             (data.StartDate is string || !('StartDate' in data)) &&
+             (data.EndDate is string || !('EndDate' in data)) &&
+             (data.startDate is string || !('startDate' in data)) &&
+             (data.endDate is string || !('endDate' in data)) &&
+             (data.EstimatedTime is number || !('EstimatedTime' in data)) &&
+             (data.Collaborators is number || !('Collaborators' in data)) &&
+             (data.Duration is number || !('Duration' in data)) &&
+             (data.duration is number || !('duration' in data)) &&
+             (data.requestedBy is string || !('requestedBy' in data)) &&
+             (data.dueDate is string || data.dueDate == null || !('dueDate' in data)) &&
+             (data.needsMaterial is bool || !('needsMaterial' in data)) &&
+             (data.executorType in ['Próprio', 'Terceiro'] || !('executorType' in data)) &&
+             (data.companyId is string || !('companyId' in data)) &&
+             (data.companyName is string || !('companyName' in data)) &&
+             (data.executorName is string || !('executorName' in data)) &&
+             (data.hourlyRate is number || !('hourlyRate' in data)) &&
+             (data.totalCost is number || !('totalCost' in data));
+    }
+
+    function isValidPreventivePlan(data) {
+      return hasOnlyAllowedFields(['ID', 'AssetID', 'assetId', 'AssetIDs', 'AssetLastDones', 'AssetNextDues', 'Task', 'Frequency', 'FrequencyType', 'frequencyType', 'FrequencyValue', 'frequencyValue', 'LastDone', 'NextDue', 'lastExecutionDate', 'nextExecutionDate', 'Type', 'Criticality', 'AssetType', 'Location', 'Plant', 'EstimatedTime', 'Collaborators', 'Checklist', 'id', 'createdBy', 'scheduleType', 'globalDate', 'assets', 'updatedAt', 'lastDone', 'nextDue']) &&
+             (!('ID' in data) || (data.ID is string && data.ID.size() < 100)) &&
+             (!('Task' in data) || (data.Task is string && data.Task.size() < 500)) &&
+             (!('Checklist' in data) || (data.Checklist is list && data.Checklist.size() < 100)) &&
+             (!('AssetIDs' in data) || data.AssetIDs is list) &&
+             (!('assets' in data) || data.assets is list) &&
+             (!('AssetID' in data) || data.AssetID is string) &&
+             (!('assetId' in data) || data.assetId is string) &&
+             (!('AssetLastDones' in data) || data.AssetLastDones is map) &&
+             (!('AssetNextDues' in data) || data.AssetNextDues is map) &&
+             (!('Type' in data) || data.Type is string) &&
+             (!('Frequency' in data) || data.Frequency is string) &&
+             (!('FrequencyType' in data) || data.FrequencyType is string) &&
+             (!('frequencyType' in data) || data.frequencyType is string) &&
+             (!('FrequencyValue' in data) || data.FrequencyValue is number) &&
+             (!('frequencyValue' in data) || data.frequencyValue is number) &&
+             (!('Criticality' in data) || data.Criticality is string) &&
+             (!('EstimatedTime' in data) || data.EstimatedTime is number) &&
+             (!('Collaborators' in data) || data.Collaborators is number) &&
+             (!('scheduleType' in data) || data.scheduleType in ['global', 'individual']) &&
+             (!('globalDate' in data) || data.globalDate is string || data.globalDate == null) &&
+             (!('updatedAt' in data) || data.updatedAt is string) &&
+             (!('lastExecutionDate' in data) || data.lastExecutionDate is string) &&
+             (!('nextExecutionDate' in data) || data.nextExecutionDate is string) &&
+             (!('LastDone' in data) || data.LastDone is string) &&
+             (!('NextDue' in data) || data.NextDue is string);
+    }
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role', 'workOrderRole', 'createdAt', 'permissions']) &&
+             data.uid is string && data.email is string &&
+             data.role in ['admin', 'planejador', 'manutentor', 'visualizador'] &&
+             (!('workOrderRole' in data) || data.workOrderRole in ['planner', 'requester']) &&
+             (data.photoURL is string || data.photoURL == null) &&
+             data.createdAt is string &&
+             (!('permissions' in data) || data.permissions is map);
+    }
+
+    function isValidServiceDemand(data) {
+      return true;
+    }
+
+    function isValidEmployee(data) {
+      return hasOnlyAllowedFields(['ID', 'Name', 'Function', 'Status', 'Type', 'id', 'createdBy', 'userUid', 'companyId', 'hourlyRate']) &&
+             data.ID is string && data.Name is string &&
+             data.Function in ['Mecânico', 'Eletrônico', 'Outro'] &&
+             data.Status in ['Ativo', 'Férias', 'Afastado'] &&
+             data.Type in ['Próprio', 'Terceiro'] &&
+             (!('userUid' in data) || data.userUid is string) &&
+             (!('companyId' in data) || data.companyId is string) &&
+             (!('hourlyRate' in data) || data.hourlyRate is number);
+    }
+
+    function isValidThirdPartyCompany(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'cnpj', 'contactName', 'email', 'phone', 'status', 'type', 'contractNumber', 'contractStartDate', 'contractEndDate', 'performanceRating', 'createdAt', 'createdBy']) &&
+             data.id is string && data.name is string &&
+             data.status in ['Ativo', 'Inativo'] &&
+             data.type in ['Fixo', 'Temporário'] &&
+             (!('contractNumber' in data) || data.contractNumber is string) &&
+             (!('contractStartDate' in data) || data.contractStartDate is string) &&
+             (!('contractEndDate' in data) || data.contractEndDate is string) &&
+             (!('performanceRating' in data) || data.performanceRating is number) &&
+             data.createdAt is string;
+    }
+
+    function isValidFailureRecord(data) {
+      return hasOnlyAllowedFields(['Grupo', 'Modelo', 'Dia', 'Mes', 'Ano', 'HoraProg', 'ManutMecanica', 'ManutEletrica', 'IndispMecDiaria', 'IndispEletDiaria', 'IndispMensalMec', 'IndispMensalElet', 'IndispTotal', 'id', 'createdBy']) &&
+             data.Grupo is string && data.Modelo is string &&
+             data.Dia is string && data.Mes is string && data.Ano is string;
+    }
+
+    function isValidTechnicalKnowledge(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'followUpLead', 'dateTime', 'failureSummary', 'actionSummary', 'rootCause', 'solutionSummary', 'location', 'model', 'equipment', 'equipmentTag', 'specialty', 'steps', 'problemPhoto', 'resultPhoto', 'createdAt', 'updatedAt', 'createdBy']) &&
+             data.title is string && data.title.size() > 0 &&
+             data.equipmentTag is string &&
+             data.steps is list &&
+             data.specialty in ['Mecânica', 'Elétrica', 'Automação', 'Hidráulica', 'Pneumática', 'Outros'];
+    }
+
+    function isValidDatabaseEntry(data) {
+      return hasOnlyAllowedFields(['uid', 'key', 'data', 'updatedAt', 'isChunked', 'chunkCount']) &&
+             (!('uid' in data) || data.uid is string) &&
+             (!('key' in data) || data.key is string) &&
+             (!('data' in data) || data.data is string) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('isChunked' in data) || data.isChunked is bool) &&
+             (!('chunkCount' in data) || data.chunkCount is number);
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    function isValidEngineeringProject(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'assetId', 'assetName', 'assets', 'description', 'objective', 'indicator', 'responsible', 'responsibleId', 'status', 'startDate', 'testStartDate', 'plannedTestDays', 'testStatus', 'result', 'lessonsLearned', 'standardize', 'scope', 'createdAt', 'updatedAt', 'tasks', 'adjustments', 'indicators', 'comments', 'statusHistory', 'createdBy', 'investmentValue', 'totalDowntime', 'productionLossRate', 'productValue', 'maintenanceCost', 'expectedRecovery', 'analysisStartDate', 'analysisEndDate', 'responsibleUid']) &&
+             (!('title' in data) || (data.title is string && data.title.size() > 0)) &&
+             (!('assetId' in data) || data.assetId is string) &&
+             (!('assetName' in data) || data.assetName is string) &&
+             (!('description' in data) || data.description is string) &&
+             (!('status' in data) || data.status in ['Planejado', 'Em execução', 'Em teste', 'Validado', 'Cancelado']) &&
+             (!('startDate' in data) || data.startDate is string || data.startDate == null) &&
+             (!('testStartDate' in data) || data.testStartDate is string || data.testStartDate == null) &&
+             (!('plannedTestDays' in data) || data.plannedTestDays is number) &&
+             (!('investmentValue' in data) || data.investmentValue is number) &&
+             (!('totalDowntime' in data) || data.totalDowntime is number) &&
+             (!('productionLossRate' in data) || data.productionLossRate is number) &&
+             (!('productValue' in data) || data.productValue is number) &&
+             (!('maintenanceCost' in data) || data.maintenanceCost is number) &&
+             (!('expectedRecovery' in data) || data.expectedRecovery is number) &&
+             (!('analysisStartDate' in data) || data.analysisStartDate is string) &&
+             (!('analysisEndDate' in data) || data.analysisEndDate is string) &&
+             (!('responsibleUid' in data) || data.responsibleUid is string) &&
+             (!('testStatus' in data) || data.testStatus in ['Não iniciado', 'Em teste', 'Aprovado', 'Reprovado', '']) &&
+             (!('result' in data) || data.result in ['Sucesso', 'Parcial', 'Falha', ''] || data.result == null) &&
+             (!('lessonsLearned' in data) || data.lessonsLearned is string || data.lessonsLearned == null) &&
+             (!('standardize' in data) || data.standardize is bool) &&
+             (!('scope' in data) || data.scope in ['specific', 'all']) &&
+             (!('assets' in data) || data.assets is list) &&
+             (!('createdAt' in data) || data.createdAt is string) &&
+             (!('updatedAt' in data) || data.updatedAt is string) &&
+             (!('id' in data) || data.id is string) &&
+             (!('responsible' in data) || data.responsible is string) &&
+             (!('responsibleId' in data) || data.responsibleId is string || data.responsibleId == null) &&
+             (!('indicator' in data) || data.indicator is string) &&
+             (!('createdBy' in data) || data.createdBy is string) &&
+             (!('tasks' in data) || data.tasks is list) &&
+             (!('adjustments' in data) || data.adjustments is list) &&
+             (!('indicators' in data) || data.indicators is list) &&
+             (!('comments' in data) || data.comments is list) &&
+             (!('statusHistory' in data) || data.statusHistory is list);
+    }
+
+    function isValidEngineeringTask(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'responsible', 'plannedDate', 'completedDate', 'status', 'type', 'requiresMaterial', 'investmentValue']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.responsible is string &&
+             data.plannedDate is string &&
+             data.status in ['Pendente', 'Em andamento', 'Concluído'] &&
+             data.type in ['Interno', 'Externo'] &&
+             data.requiresMaterial is bool &&
+             (data.investmentValue is number || !('investmentValue' in data));
+    }
+
+    function isValidEngineeringAdjustment(data) {
+      return hasOnlyAllowedFields(['id', 'date', 'description', 'responsible']) &&
+             data.date is string &&
+             data.description is string &&
+             data.responsible is string;
+    }
+
+    function isValidEngineeringIndicator(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'before', 'after', 'variation']) &&
+             data.name is string &&
+             data.before is number &&
+             data.after is number &&
+             data.variation is number;
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    function isMasterOrOwner(ownerField) {
+      return isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.get(ownerField, null));
+    }
+
+    match /engineering-projects/{projectId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidEngineeringProject(request.resource.data);
+      allow update: if (isMasterOrOwner('createdBy') || isMasterOrOwner('responsibleUid')) && isValidEngineeringProject(request.resource.data);
+      allow delete: if isAdmin();
+
+      match /tasks/{taskId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidEngineeringTask(request.resource.data);
+        allow delete: if isAdmin();
+      }
+      match /adjustments/{adjustmentId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidEngineeringAdjustment(request.resource.data);
+        allow delete: if isAdmin();
+      }
+      match /indicators/{indicatorId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidEngineeringIndicator(request.resource.data);
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /users/{userId}/databaseEntries/{key} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidDatabaseEntry(request.resource.data);
+    }
+
+    match /globalData/{key} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /assets/{assetId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAsset(request.resource.data);
+      allow update: if (isMasterOrOwner('createdBy') || !('createdBy' in resource.data)) && isValidAsset(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    function getUserData() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : {};
+    }
+
+    function isPlanner() {
+      let role = getUserData().get('role', 'visualizador');
+      return isAdmin() || role == 'planejador' || getUserData().get('workOrderRole', 'requester') == 'planner';
+    }
+
+    function isMaintenanceWorker() {
+      let role = getUserData().get('role', 'visualizador');
+      return isAdmin() || role == 'planejador' || role == 'manutentor';
+    }
+
+    function isRequester() {
+      return !isAdmin() && getUserData().get('workOrderRole', 'requester') == 'requester';
+    }
+
+    match /work-orders/{woId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || (isAuthenticated() && isValidWorkOrder(request.resource.data));
+      allow update: if isAdmin();
+      allow update: if isPlanner() && isValidWorkOrder(request.resource.data);
+      allow update: if isMaintenanceWorker() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['Checklist', 'Status', 'CompletedAt', 'Duration', 'duration']) && isValidWorkOrder(request.resource.data);
+      allow delete: if isPlanner();
+    }
+
+    match /preventive-plans/{planId} {
+      allow read: if isAuthenticated();
+      allow create: if isPlanner() && isValidPreventivePlan(request.resource.data);
+      allow update: if isPlanner() && isValidPreventivePlan(request.resource.data);
+      allow delete: if isAdmin();
+
+      match /checklist_itens/{itemId} {
+        allow read: if isAuthenticated();
+        allow create, update: if (isPlanner() || isMaintenanceWorker()) && isValidChecklistItem(request.resource.data);
+        allow delete: if isPlanner();
+      }
+    }
+
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidEmployee(request.resource.data);
+      allow update: if isMasterOrOwner('createdBy') && isValidEmployee(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /thirdPartyCompanies/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidThirdPartyCompany(request.resource.data);
+      allow update: if isMasterOrOwner('createdBy') && isValidThirdPartyCompany(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /failure-records/{recordId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidFailureRecord(request.resource.data);
+      allow update: if isMasterOrOwner('createdBy') && isValidFailureRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /notifications/{id} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && 
+                       request.resource.data.message is string && request.resource.data.message.size() < 1000 &&
+                       request.resource.data.userId is string && request.resource.data.userId.size() < 50;
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId &&
+                       request.resource.data.message is string && request.resource.data.message.size() < 1000 &&
+                       request.resource.data.userId is string && request.resource.data.userId.size() < 50;
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    match /serviceDemands/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated();
+    }
+
+    match /maintenanceSolutions/{id} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated();
+    }
+
+    match /technicalKnowledge/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidTechnicalKnowledge(request.resource.data);
+      allow update: if isAuthenticated() && isValidTechnicalKnowledge(request.resource.data);
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.createdBy);
+    }
+
+    match /requisitions/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isMasterOrOwner('createdBy');
+      allow delete: if isAdmin();
+    }
+
+    function isValidChecklistItem(data) {
+      return hasOnlyAllowedFields(['id', 'planoId', 'grupo', 'equipamento', 'tarefa', 'sequencia', 'obrigatoria', 'executado', 'status', 'observacao', 'quantidade', 'material', 'createdAt', 'updatedAt']) &&
+             data.planoId is string &&
+             data.grupo is string && data.grupo.size() < 100 &&
+             data.equipamento is string && data.equipamento.size() < 100 &&
+             data.tarefa is string && data.tarefa.size() < 500 &&
+             data.sequencia is int &&
+             data.executado is bool &&
+             data.status in ['ok', 'regularizado', 'substituido'] &&
+             (!('observacao' in data) || (data.observacao is string && data.observacao.size() < 1000)) &&
+             (!('quantidade' in data) || (data.quantidade is string && data.quantidade.size() < 50)) &&
+             (!('material' in data) || (data.material is string && data.material.size() < 200));
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      
+      // Users can create their own profile. Role must be 'visualizador' unless they are the bootstrap admin.
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
+                      (request.resource.data.role == 'visualizador' || request.auth.token.email in ["lucas.lds36@gmail.com", "matheuslnapoli22@gmail.com", "henriquedefariaalmeida@gmail.com"]);
+      
+      // Users can update their own profile but NOT their role.
+      // Admins can update any user's role and permissions.
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) ||
+                      (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'permissions', 'workOrderRole']) && request.resource.data.role in ['admin', 'planejador', 'manutentor', 'visualizador']);
+      
+      allow delete: if isAdmin();
+    }
+
+    match /dashboard-indicators/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /indicadores_manutencao/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

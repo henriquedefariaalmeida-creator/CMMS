@@ -1,0 +1,181 @@
+{
+  "entities": {
+    "DatabaseEntry": {
+      "title": "DatabaseEntry",
+      "description": "Represents a database entry for the application.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The user ID." },
+        "key": { "type": "string", "description": "The key of the data (e.g., bditssData, dinamicaData)." },
+        "data": { "type": "string", "description": "The JSON stringified data." },
+        "updatedAt": { "type": "string", "description": "The timestamp of the last update." },
+        "isChunked": { "type": "boolean", "description": "Whether the data is chunked." },
+        "chunkCount": { "type": "integer", "description": "The number of chunks." }
+      },
+      "required": ["uid", "key", "data"]
+    },
+    "ServiceDemand": {
+      "title": "ServiceDemand",
+      "description": "Represents a service demand.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "openedAt": { "type": "string" },
+        "requesterUid": { "type": "string" },
+        "requesterName": { "type": "string" },
+        "description": { "type": "string" },
+        "area": { "type": "string" },
+        "executorType": { "type": "string" },
+        "responsibleId": { "type": "string" },
+        "responsibleName": { "type": "string" },
+        "responsibleHourlyRate": { "type": "number" },
+        "responsibleHoursWorked": { "type": "number" },
+        "priority": { "type": "string" },
+        "estimatedDeliveryDate": { "type": "string" },
+        "startDate": { "type": "string" },
+        "executorName": { "type": "string" },
+        "companyId": { "type": "string" },
+        "companyName": { "type": "string" },
+        "status": { "type": "string" },
+        "needsMaterial": { "type": "boolean" },
+        "materialRequisition": { "type": "object" },
+        "collaborators": { "type": "array" },
+        "scopeChanges": { "type": "array" },
+        "statusHistory": { "type": "array" },
+        "closedAt": { "type": "string" },
+        "totalCost": { "type": "number" }
+      },
+      "required": ["id", "openedAt", "requesterUid", "description", "area", "executorType", "responsibleId", "priority", "estimatedDeliveryDate", "status"]
+    },
+    "Requisition": {
+      "title": "Requisition",
+      "description": "Represents a material requisition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "item": { "type": "string" },
+        "itemCode": { "type": "string" },
+        "description": { "type": "string" },
+        "supplier": { "type": "string" },
+        "category": { "type": "string" },
+        "requestDate": { "type": "string" },
+        "deliveryDate": { "type": "string" },
+        "leadTime": { "type": "integer" },
+        "daysRemaining": { "type": "integer" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "code", "item", "supplier", "requestDate", "deliveryDate", "status"]
+    },
+    "ThirdPartyCompany": {
+      "title": "ThirdPartyCompany",
+      "description": "Represents a third-party company.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "cnpj": { "type": "string" },
+        "contactName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "status": { "type": "string", "enum": ["Ativo", "Inativo"] },
+        "contractNumber": { "type": "string" },
+        "contractStartDate": { "type": "string" },
+        "contractEndDate": { "type": "string" },
+        "performanceRating": { "type": "number" },
+        "type": { "type": "string", "enum": ["Fixo", "Temporário"] },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "name", "status", "type", "createdAt"]
+    },
+    "ChecklistItem": {
+      "title": "ChecklistItem",
+      "description": "Represents a checklist item for a preventive plan.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "planoId": { "type": "string" },
+        "grupo": { "type": "string" },
+        "equipamento": { "type": "string" },
+        "tarefa": { "type": "string" },
+        "sequencia": { "type": "integer" },
+        "obrigatoria": { "type": "boolean" },
+        "executado": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["ok", "regularizado", "substituido"] },
+        "observacao": { "type": "string" },
+        "quantidade": { "type": "string" },
+        "material": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["planoId", "grupo", "equipamento", "tarefa", "sequencia", "executado", "status"]
+    },
+    "PreventivePlan": {
+      "title": "PreventivePlan",
+      "description": "Represents a preventive maintenance plan.",
+      "type": "object",
+      "properties": {
+        "ID": { "type": "string" },
+        "AssetIDs": { "type": "array" },
+        "Task": { "type": "string" },
+        "Frequency": { "type": "string" },
+        "LastDone": { "type": "string" },
+        "NextDue": { "type": "string" },
+        "Type": { "type": "string" },
+        "Criticality": { "type": "string" },
+        "EstimatedTime": { "type": "number" },
+        "Collaborators": { "type": "number" }
+      },
+      "required": ["ID", "AssetIDs", "Task", "Frequency", "LastDone", "NextDue", "Type", "Criticality"]
+    },
+    "MaintenanceSolution": {
+      "title": "MaintenanceSolution",
+      "description": "Represents a maintenance solution for a problem.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "maquina": { "type": "string" },
+        "tipo": { "type": "string", "enum": ["Mecânico", "Elétrico", "Automação", "Outros"] },
+        "problema": { "type": "string" },
+        "solucao": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "imagens": { "type": "array", "items": { "type": "string" } },
+        "obs": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "maquina", "tipo", "problema", "solucao", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{uid}/databaseEntries/{key}": {
+      "schema": "DatabaseEntry",
+      "description": "Stores database entries for each user."
+    },
+    "serviceDemands/{id}": {
+      "schema": "ServiceDemand",
+      "description": "Stores service demands."
+    },
+    "requisitions/{id}": {
+      "schema": "Requisition",
+      "description": "Stores material requisitions."
+    },
+    "thirdPartyCompanies/{id}": {
+      "schema": "ThirdPartyCompany",
+      "description": "Stores third-party companies."
+    },
+    "preventive-plans/{planId}": {
+      "schema": "PreventivePlan",
+      "description": "Stores preventive maintenance plans."
+    },
+    "preventive-plans/{planId}/checklist_itens/{itemId}": {
+      "schema": "ChecklistItem",
+      "description": "Stores checklist items for a specific preventive plan."
+    },
+    "maintenanceSolutions/{id}": {
+      "schema": "MaintenanceSolution",
+      "description": "Stores maintenance solutions."
+    }
+  }
+}

@@ -1,0 +1,297 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: assets
+    // Fields: ID, Tag, Model, Description, Location, Plant, Manufacturer, Status, InstallDate, id
+    //
+    // Collection: work-orders
+    // Fields: ID, AssetID, PlanID, Description, Priority, Status, AssignedTo, CreatedAt, CompletedAt, ScheduledDate, EstimatedTime, Collaborators, id
+    //
+    // Collection: preventive-plans
+    // Fields: ID, AssetIDs, AssetLastDones, AssetNextDues, Task, Frequency, LastDone, NextDue, Type, Criticality, AssetType, Location, Plant, EstimatedTime, Collaborators, id
+    //
+    // Collection: users
+    // Fields: uid, email, displayName, photoURL, role, createdAt
+    //
+    // Collection: employees
+    // Fields: ID, Name, Function, Status, id
+    //
+    // Collection: failure-records
+    // Fields: Grupo, Modelo, Dia, Mes, Ano, HoraProg, ManutMecanica, ManutEletrica, IndispMecDiaria, IndispEletDiaria, IndispMensalMec, IndispMensalElet, IndispTotal, id
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin') ||
+          (request.auth.token.email == "lucas.lds36@gmail.com" && request.auth.token.email_verified == true)
+        );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function validString(field, min, max) {
+      return request.resource.data[field] is string && 
+             request.resource.data[field].size() >= min && 
+             request.resource.data[field].size() <= max;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidAsset(data) {
+      return hasOnlyAllowedFields(['ID', 'Tag', 'Model', 'Description', 'Location', 'Plant', 'Manufacturer', 'Status', 'InstallDate', 'id']) &&
+             data.ID is string && data.ID.size() > 0 &&
+             data.Tag is string && data.Tag.size() > 0 &&
+             data.Model is string && data.Model.size() > 0 &&
+             data.Status in ['Ativo', 'Inativo', 'Em Manutenção', 'Parado'];
+    }
+
+    function isValidWorkOrder(data) {
+      return hasOnlyAllowedFields(['ID', 'AssetID', 'PlanID', 'TechnicianID', 'Description', 'Priority', 'Type', 'Nature', 'ActivityType', 'Status', 'AssignedTo', 'CreatedAt', 'CompletedAt', 'ScheduledDate', 'StartDate', 'EndDate', 'EstimatedTime', 'Collaborators', 'Duration', 'Cause', 'id']) &&
+             data.ID is string && data.AssetID is string &&
+             (data.PlanID is string || !('PlanID' in data)) &&
+             (data.TechnicianID is string || !('TechnicianID' in data)) &&
+             data.Priority in ['Baixa', 'Média', 'Alta', 'Crítica'] &&
+             (data.Type in ['Preventiva', 'Corretiva', 'Preditiva'] || !('Type' in data)) &&
+             (data.Nature in ['Emergencial', 'Programada', 'Oportunidade'] || !('Nature' in data)) &&
+             (data.ActivityType in ['Lubrificação', 'Inspeção', 'Ajuste', 'Reparo', 'Substituição'] || !('ActivityType' in data)) &&
+             data.Status in ['Em Aberto', 'Em Execução', 'Concluída', 'Cancelada'] &&
+             (data.ScheduledDate is string || !('ScheduledDate' in data)) &&
+             (data.StartDate is string || !('StartDate' in data)) &&
+             (data.EndDate is string || !('EndDate' in data)) &&
+             (data.EstimatedTime is number || !('EstimatedTime' in data)) &&
+             (data.Collaborators is number || !('Collaborators' in data)) &&
+             (data.Duration is number || !('Duration' in data)) &&
+             (data.Cause is string || !('Cause' in data));
+    }
+
+    function isValidPreventivePlan(data) {
+      return hasOnlyAllowedFields(['ID', 'AssetID', 'AssetIDs', 'AssetLastDones', 'AssetNextDues', 'Task', 'Frequency', 'FrequencyType', 'FrequencyValue', 'LastDone', 'NextDue', 'Type', 'Criticality', 'AssetType', 'Location', 'Plant', 'EstimatedTime', 'Collaborators', 'id']) &&
+             data.ID is string && data.AssetIDs is list &&
+             (data.AssetID is string || !('AssetID' in data)) &&
+             (data.AssetLastDones is map || !('AssetLastDones' in data)) &&
+             (data.AssetNextDues is map || !('AssetNextDues' in data)) &&
+             data.Type in ['Preventiva', 'Inspeção', 'Lubrificação', 'Manutenção Programada'] &&
+             (data.FrequencyType in ['dias', 'horas'] || !('FrequencyType' in data)) &&
+             (data.FrequencyValue is number || !('FrequencyValue' in data)) &&
+             data.Criticality in ['Alta', 'Média', 'Baixa'] &&
+             data.EstimatedTime is number && data.Collaborators is number;
+    }
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt', 'permissions']) &&
+             data.uid is string && data.email is string &&
+             data.role in ['admin', 'user'] &&
+             (data.photoURL is string || data.photoURL == null) &&
+             data.createdAt is string &&
+             (!('permissions' in data) || data.permissions is map);
+    }
+
+    function isValidServiceDemand(data) {
+      return true;
+    }
+
+    function isValidEmployee(data) {
+      return hasOnlyAllowedFields(['ID', 'Name', 'Function', 'Status', 'Type', 'id']) &&
+             data.ID is string && data.Name is string &&
+             data.Function in ['Mecânico', 'Eletrônico', 'Outro'] &&
+             data.Status in ['Ativo', 'Férias', 'Afastado'] &&
+             data.Type in ['Próprio', 'Terceiro'];
+    }
+
+    function isValidFailureRecord(data) {
+      return hasOnlyAllowedFields(['Grupo', 'Modelo', 'Dia', 'Mes', 'Ano', 'HoraProg', 'ManutMecanica', 'ManutEletrica', 'IndispMecDiaria', 'IndispEletDiaria', 'IndispMensalMec', 'IndispMensalElet', 'IndispTotal', 'id']) &&
+             data.Grupo is string && data.Modelo is string &&
+             data.Dia is string && data.Mes is string && data.Ano is string;
+    }
+
+    function isValidDatabaseEntry(data) {
+      return hasOnlyAllowedFields(['uid', 'key', 'data', 'updatedAt', 'isChunked', 'chunkCount']) &&
+             (!('uid' in data) || data.uid is string) &&
+             (!('key' in data) || data.key is string) &&
+             (!('data' in data) || data.data is string) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('isChunked' in data) || data.isChunked is bool) &&
+             (!('chunkCount' in data) || data.chunkCount is number);
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    function isValidEngineeringProject(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'assetId', 'assetName', 'description', 'objective', 'indicator', 'responsible', 'status', 'startDate', 'testStartDate', 'plannedTestDays', 'testStatus', 'result', 'lessonsLearned', 'standardize', 'createdAt', 'updatedAt', 'tasks', 'adjustments', 'indicators', 'comments', 'statusHistory']) &&
+             data.title is string && data.title.size() > 0 &&
+             data.assetId is string &&
+             data.assetName is string &&
+             data.description is string &&
+             data.status in ['Planejado', 'Em execução', 'Em teste', 'Validado', 'Cancelado'] &&
+             (data.startDate is string || !('startDate' in data)) &&
+             (data.testStartDate is string || !('testStartDate' in data)) &&
+             (data.plannedTestDays is number || !('plannedTestDays' in data)) &&
+             (data.testStatus in ['Não iniciado', 'Em teste', 'Aprovado', 'Reprovado'] || !('testStatus' in data)) &&
+             (data.result in ['Sucesso', 'Parcial', 'Falha'] || !('result' in data)) &&
+             (data.lessonsLearned is string || !('lessonsLearned' in data)) &&
+             (data.standardize is bool || !('standardize' in data)) &&
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             (data.id is string || !('id' in data)) &&
+             (!('tasks' in data) || data.tasks is list) &&
+             (!('adjustments' in data) || data.adjustments is list) &&
+             (!('indicators' in data) || data.indicators is list) &&
+             (!('comments' in data) || data.comments is list) &&
+             (!('statusHistory' in data) || data.statusHistory is list);
+    }
+
+    function isValidEngineeringTask(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'responsible', 'plannedDate', 'completedDate', 'status', 'type', 'requiresMaterial', 'investmentValue']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.responsible is string &&
+             data.plannedDate is string &&
+             data.status in ['Pendente', 'Em andamento', 'Concluído'] &&
+             data.type in ['Interno', 'Externo'] &&
+             data.requiresMaterial is bool &&
+             (data.investmentValue is number || !('investmentValue' in data));
+    }
+
+    function isValidEngineeringAdjustment(data) {
+      return hasOnlyAllowedFields(['id', 'date', 'description', 'responsible']) &&
+             data.date is string &&
+             data.description is string &&
+             data.responsible is string;
+    }
+
+    function isValidEngineeringIndicator(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'before', 'after', 'variation']) &&
+             data.name is string &&
+             data.before is number &&
+             data.after is number &&
+             data.variation is number;
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /engineering-projects/{projectId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidEngineeringProject(request.resource.data);
+      allow delete: if isAdmin();
+
+      match /tasks/{taskId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidEngineeringTask(request.resource.data);
+        allow delete: if isAdmin();
+      }
+      match /adjustments/{adjustmentId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidEngineeringAdjustment(request.resource.data);
+        allow delete: if isAdmin();
+      }
+      match /indicators/{indicatorId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidEngineeringIndicator(request.resource.data);
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /users/{userId}/databaseEntries/{key} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidDatabaseEntry(request.resource.data);
+    }
+
+    match /globalData/{key} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /assets/{assetId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidAsset(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /work-orders/{woId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidWorkOrder(request.resource.data);
+      allow update: if isAuthenticated() && isValidWorkOrder(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /preventive-plans/{planId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidPreventivePlan(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidEmployee(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /failure-records/{recordId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidFailureRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /serviceDemands/{id} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      
+      // Users can create their own profile. Role must be 'user' unless they are the bootstrap admin.
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
+                      (request.resource.data.role == 'user' || request.auth.token.email == "lucas.lds36@gmail.com");
+      
+      // Users can update their own profile but NOT their role.
+      // Admins can update any user's role.
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) ||
+                      (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role']) && request.resource.data.role in ['admin', 'user']);
+      
+      allow delete: if isAdmin();
+    }
+
+    match /dashboard-indicators/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
